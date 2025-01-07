@@ -127,6 +127,18 @@ class Attention(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0., selfatt=True, kv_dim=None):
         super().__init__()
+        """
+        References
+        1. Scene representation transformer: Geometry-free novel view synthesis through set-latent scene
+                 representations. Sajjadi, M., et al.  2022b.
+
+        Encoder [1, Figure 2, center]:
+            dim, depth, heads, dim_head, mlp_dim, dropout, selfatt, kv_dim:
+                        (768, 10, 12, 64, 1536, 0.0, True, None)
+        Decoder [1, Figure 2, right]:
+            dim, depth, heads, dim_head, mlp_dim, dropout, selfatt, kv_dim:
+                    (180, 2, 12, 64, 1536, 0.0, False, 768)
+        """
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([

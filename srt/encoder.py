@@ -122,8 +122,10 @@ class SRTEncoder(nn.Module):
                                       # output: x.shape torch.Size([8, 16, 768])
         patches_per_image, channels_per_patch = x.shape[1:]
         x = x.reshape(batch_size, num_images * patches_per_image, channels_per_patch)
+        # output: x.shape torch.Size([8, 16, 768])
+        # this completes CNN [1, Figure 2, left]
 
-        x = self.transformer(x)
+        x = self.transformer(x)     # this runs Encoder [1, Figure 2, center]
 
         return x
 
