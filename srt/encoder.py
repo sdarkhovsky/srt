@@ -72,27 +72,54 @@ class SRTEncoder(nn.Module):
             scene representation: [batch_size, num_patches, channels_per_patch]
         """
 
+        """
+        References
+        1. Scene representation transformer: Geometry-free novel view synthesis through set-latent scene
+                 representations. Sajjadi, M., et al.  2022b.
+
+        images.shape     torch.Size([8, 1, 3, 64, 64])
+        camera_pos.shape     torch.Size([8, 1, 3])
+        rays.shape     torch.Size([8, 1, 64, 64, 3])
+        batch_size, num_images (8, 1)   (originally was (256,1))
+        self.canonical_camera_embedding.shape torch.Size([1, 1, 768])
+        self.non_canonical_camera_embedding.shape torch.Size([1, 1, 768])
+        """
+
         batch_size, num_images = images.shape[:2]
 
         x = images.flatten(0, 1)
+
+        # for parallel processing batch_size and num_images dimension are treated as a batch
         camera_pos = camera_pos.flatten(0, 1)
         rays = rays.flatten(0, 1)
 
         canonical_idxs = torch.zeros(batch_size, num_images)
+
+        # mark camera 0 of each num_images with 1. It's used in camera_id_embedding
         canonical_idxs[:, 0] = 1
         canonical_idxs = canonical_idxs.flatten(0, 1).unsqueeze(-1).unsqueeze(-1).to(x)
+
+        # camera_id_embedding assigns canonical_camera_embedding to the camera 0
+        # and non_canonical_camera_embedding to other cameras
         camera_id_embedding = canonical_idxs * self.canonical_camera_embedding + \
                 (1. - canonical_idxs) * self.non_canonical_camera_embedding
-
-        ray_enc = self.ray_encoder(camera_pos, rays)
-        x = torch.cat((x, ray_enc), 1)
-        x = self.conv_blocks(x)
-        x = self.per_patch_linear(x)
+        # a ray stores the direction from correspondin camera_pos to a pixel in corresponding image
+        # encode (camera origin, ray direction) for each pixel of each image
+        ray_enc = self.ray_encoder(camera_pos, rays)  # ray_enc.shape:  torch.Size([8, 180, 64, 64])
+        x = torch.cat((x, ray_enc), 1)  # output x.shape: torch.Size([8, 183, 64, 64]),
+        x = self.conv_blocks(x)   # convolution blocks from [1, Figure 2, left]
+                                  # output x.shape torch.Size([8, 1536, 4, 4])
+        x = self.per_patch_linear(x)  # transforming to the transformer embedding dimension
+                                      # output  x.shape  torch.Size([8, 768, 4, 4])
         height, width = x.shape[2:]
-        x = x + self.pixel_embedding[:, :, :height, :width]
-        x = x.flatten(2, 3).permute(0, 2, 1)
-        x = x + camera_id_embedding
-
+        # type(self.pixel_embedding): <class 'torch.nn.parameter.Parameter'>
+        # self.pixel_embedding.shape: torch.Size([1, 768, 15, 20])
+        x = x + self.pixel_embedding[:, :, :height, :width]  # add constant random pixel embedding
+                                                             # to each generalized pixel (i.e. patch)
+        x = x.flatten(2, 3).permute(0, 2, 1)  # input:  x.shape torch.Size([8, 768, 4, 4])
+                                              # output: x.shape torch.Size([8, 16, 768])
+        x = x + camera_id_embedding   # camera_id_embedding.shape: torch.Size([8, 1, 768])
+                                      # output: x.shape torch.Size([8, 16, 768])
         patches_per_image, channels_per_patch = x.shape[1:]
         x = x.reshape(batch_size, num_images * patches_per_image, channels_per_patch)
 
