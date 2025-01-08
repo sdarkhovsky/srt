@@ -106,6 +106,15 @@ class Attention(nn.Module):
         ) if project_out else nn.Identity()
 
     def forward(self, x, z=None):
+        """
+        References
+        1. Scene representation transformer: Geometry-free novel view synthesis through set-latent scene
+                 representations. Sajjadi, M., et al.  2022b.
+
+        Multi-Head Attention in [1, Figure 2, center and right]
+        x.shape: torch.Size([8, 16, 768]),  batch_size, num_images * patches_per_image, channels_per_patch
+        """
+
         if z is None:
             qkv = self.to_qkv(x).chunk(3, dim=-1)
         else:
@@ -113,7 +122,21 @@ class Attention(nn.Module):
             k, v = self.to_kv(z).chunk(2, dim=-1)
             qkv = (q, k, v)
 
+        """
+        type(qkv): <class 'tuple'>
+        len(qkv): 3
+        qkv[i].shape: torch.Size([8, 16, 768]), i=0,1,2
+        map applies rearrange to each qkv[i]
+        self.heads: 12
+        """
+
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
+
+        """
+        q.shape, k.shape, v.shape:
+        (torch.Size([8, 12, 16, 64]), torch.Size([8, 12, 16, 64]), torch.Size([8, 12, 16, 64]))
+        self.scale: 0.125
+        """
 
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
 
@@ -121,6 +144,9 @@ class Attention(nn.Module):
 
         out = torch.matmul(attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
+
+        # out.shape: torch.Size([8, 16, 768])
+
         return self.to_out(out)
 
 

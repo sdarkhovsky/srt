@@ -127,6 +127,8 @@ class SRTEncoder(nn.Module):
 
         x = self.transformer(x)     # this runs Encoder [1, Figure 2, center]
 
+        # x.shape: torch.Size([8, 16, 768])
+
         return x
 
 

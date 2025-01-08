@@ -74,6 +74,7 @@ class SRTTrainer:
         target_pixels = data.get('target_pixels').to(device)
 
         z = self.model.encoder(input_images, input_camera_pos, input_rays)
+        # z.shape: torch.Size([8, 16, 768])   batch_size, num_images * patches_per_image, channels_per_patch
 
         target_camera_pos = data.get('target_camera_pos').to(device)
         target_rays = data.get('target_rays').to(device)
