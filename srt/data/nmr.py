@@ -65,12 +65,14 @@ class NMRDataset(Dataset):
     def __getitem__(self, idx):
         scene_idx = idx % self.num_scenes
         view_idx = idx // self.num_scenes
+        # view_idx: 8
         target_views = np.array(list(set(range(24)) - set([view_idx])))
 
         scene_path = os.path.join(self.path, self.scene_paths[scene_idx])
         images = [np.asarray(imageio.imread(
             os.path.join(scene_path, 'image', f'{i:04d}.png'))) for i in range(24)]
         images = np.stack(images, 0).astype(np.float32) / 255.
+        # images.shape: (24, 64, 64, 3)
         input_image = np.transpose(images[view_idx], (2, 0, 1))
 
         cameras = np.load(os.path.join(scene_path, 'cameras.npz'))
@@ -79,8 +81,37 @@ class NMRDataset(Dataset):
         for i in range(24): # Apply rotation matrix to rotate coordinate system
             cameras[f'world_mat_inv_{i}'] = self.rot_mat @ cameras[f'world_mat_inv_{i}'] 
             # The transpose here is not technically necessary, since the rotation matrix is symmetric
+            # self.rot_mat is not symmetric os np.transpose is necessary (see details below)
             cameras[f'world_mat_{i}'] =  cameras[f'world_mat_{i}'] @ np.transpose(self.rot_mat)
-
+        """
+        cameras['world_mat_0']:
+            array([[ 0.        ,  0.        , -1.        ,  0.        ],
+                   [ 0.5       , -0.86602539,  0.        ,  0.        ],
+                   [-0.86602539, -0.49999997,  0.        ,  2.73199987],
+                   [ 0.        ,  0.        ,  0.        ,  1.        ]])
+        cameras['camera_mat_0']:
+            array([[3.7320509, 0.       , 0.       , 0.       ],
+                   [0.       , 3.7320509, 0.       , 0.       ],
+                   [0.       , 0.       , 1.       , 0.       ],
+                   [0.       , 0.       , 0.       , 1.       ]])
+        A camera matrix in world coordinates: K⋅[I 0][R T]. It's 3x4. K 3x3 is the intrinsic camera matrix
+                                                     [0 1]
+        Xcam = [R T]⋅Xworld,  Xworld = [R T]⁻¹⋅Xcam       [R T]⁻¹ = [R⁻¹ R⁻¹T]
+               [0 1]                   [0 1]              [0 1]     [0   1   ]
+        The the camera origin in the world coordinates is [R⁻¹ R⁻¹T] [0] = [R⁻¹T], i.e. the last column
+                                                          [0   1   ] [1]   [1   ]
+        Xworld_rot = rot_mat⋅Xworld = rot_mat⋅[R T]⁻¹⋅Xcam      Xcam = [R T]⋅rot_mat⁻¹⋅Xworld_rot
+                                              [0 1]                    [0 1]
+        world_mat_{i} corresponds to [R T]     world_mat_inv_{i}   corresponds to [R T]⁻¹
+                                     [0 1]                                        [0 1]
+        camera_mat_{i} probably corresponds to the intrinsic camera matrix expanded to the size 4x4: [K 0]
+                                                                                                     [0 1]
+        Let K = [fx 0  0]      Ximg = K⋅[I 0]⋅Xcam = K [X Y Z]ᵀ = [fx⋅X fy⋅Y Z]ᵀ ≈ [fx⋅X/Z  fy⋅Y/Z  1]ᵀ
+                [0  fy 0]
+                [0  0  1]
+        [Ximg] = [K 0]⋅[I 0]⋅Xcam =  [K 0]⋅Xcam          Xcam = [K 0]⁻¹ [Ximg]
+        [1   ]   [0 1] [0 1]         [0 1]                      [0 1]   [1   ]
+        """
         rays = []
         height = width = 64
 
@@ -88,16 +119,22 @@ class NMRDataset(Dataset):
         ymap = np.linspace(-1, 1, height)
         xmap, ymap = np.meshgrid(xmap, ymap)
 
+        """
+        Image coordinates of the pixels are (i,j), i < height, j < width
+        Xcam = [i j 1]ᵀ
+        """
         for i in range(24):
             cur_rays = np.stack((xmap, ymap, np.ones_like(xmap)), -1)
             cur_rays = transform_points(cur_rays,
                                         cameras[f'world_mat_inv_{i}'] @ cameras[f'camera_mat_inv_{i}'],
                                         translate=False)
+            # cur_rays.shape (64, 64, 3)
             cur_rays = cur_rays[..., :3]
             cur_rays = cur_rays / np.linalg.norm(cur_rays, axis=-1, keepdims=True)
             rays.append(cur_rays)
             
         rays = np.stack(rays, axis=0).astype(np.float32)
+        # the last column of world_mat_inv_X is the camera position in the world coordinates
         camera_pos = [cameras[f'world_mat_inv_{i}'][:3, -1] for i in range(24)]
         camera_pos = np.stack(camera_pos, axis=0).astype(np.float32)
         # camera_pos and rays are now in world coordinates.
