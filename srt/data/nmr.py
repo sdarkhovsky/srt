@@ -109,8 +109,12 @@ class NMRDataset(Dataset):
         Let K = [fx 0  0]      Ximg = K⋅[I 0]⋅Xcam = K [X Y Z]ᵀ = [fx⋅X fy⋅Y Z]ᵀ ≈ [fx⋅X/Z  fy⋅Y/Z  1]ᵀ
                 [0  fy 0]
                 [0  0  1]
-        [Ximg] = [K 0]⋅[I 0]⋅Xcam =  [K 0]⋅Xcam          Xcam = [K 0]⁻¹ [Ximg]
-        [1   ]   [0 1] [0 1]         [0 1]                      [0 1]   [1   ]
+        [Ximg] = [K 0]⋅[I 0]⋅Xcam = [K 0]⋅Xcam =[K 0]⋅[R T]⋅Xworld
+        [1   ]   [0 1] [0 1]        [0 1]       [0 1] [0 1]
+
+        Xworld = [R T]⁻¹[K 0]⁻¹[Ximg],   [R T]⁻¹  is world_mat_inv_{i},   [K 0]⁻¹ is camera_mat_inv_{i}
+                 [0 1]  [0 1]  [1   ]    [0 1]                             [0 1]
+
         """
         rays = []
         height = width = 64
@@ -119,16 +123,14 @@ class NMRDataset(Dataset):
         ymap = np.linspace(-1, 1, height)
         xmap, ymap = np.meshgrid(xmap, ymap)
 
-        """
-        Image coordinates of the pixels are (i,j), i < height, j < width
-        Xcam = [i j 1]ᵀ
-        """
         for i in range(24):
             cur_rays = np.stack((xmap, ymap, np.ones_like(xmap)), -1)
             cur_rays = transform_points(cur_rays,
                                         cameras[f'world_mat_inv_{i}'] @ cameras[f'camera_mat_inv_{i}'],
                                         translate=False)
             # cur_rays.shape (64, 64, 3)
+            # the coordinates of image points in the camera coordinate system 
+            # define the direction of the ray connecting the origin and the point
             cur_rays = cur_rays[..., :3]
             cur_rays = cur_rays / np.linalg.norm(cur_rays, axis=-1, keepdims=True)
             rays.append(cur_rays)
